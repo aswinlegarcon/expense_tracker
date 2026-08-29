@@ -1,4 +1,4 @@
-import { addMonths, format, parseISO, startOfMonth, subDays } from 'date-fns'
+import { addDays, addMonths, format, parseISO, startOfMonth, subDays } from 'date-fns'
 
 /** The only place `Date` meets strings. All dates elsewhere are yyyy-MM-dd strings. */
 
@@ -38,4 +38,13 @@ export function formatShortMonth(m: string): string {
 
 export function formatFullDate(d: ISODate): string {
   return format(parseISO(d), 'd MMM yyyy')
+}
+
+export function addDaysISO(d: ISODate, days: number): ISODate {
+  return format(addDays(parseISO(d), days), 'yyyy-MM-dd')
+}
+
+/** Last day of the month that starts at `monthStart`. */
+export function monthEndISO(monthStart: ISODate): ISODate {
+  return addDaysISO(monthStartISO(1, monthStart), -1)
 }

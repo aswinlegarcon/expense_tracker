@@ -10,6 +10,24 @@
 html {
   font-family: var(--font-sans);
   -webkit-tap-highlight-color: transparent;
+
+  /* Chart ink — pairs validated with the dataviz palette checker (CVD + contrast)
+     against the white (light) / slate-900 (dark) card surfaces. */
+  --chart-income: #059669;
+  --chart-expense: #dc2626;
+  --chart-cur: #2563eb;
+  --chart-prev: #d97706;
+  --chart-grid: #e2e8f0;
+  --chart-axis: #64748b;
+}
+
+html.dark {
+  --chart-income: #059669;
+  --chart-expense: #ef4444;
+  --chart-cur: #3b82f6;
+  --chart-prev: #d97706;
+  --chart-grid: #1e293b;
+  --chart-axis: #94a3b8;
 }
 
 body {
