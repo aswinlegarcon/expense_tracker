@@ -1,0 +1,25 @@
+# Supabase's free tier pauses projects after ~1 week without API activity.
+# This cheap anon ping (returns [] under RLS) twice a week keeps it awake.
+# Note: GitHub disables cron workflows after ~60 days without repo activity;
+# a single commit or manual run re-enables it.
+name: keepalive
+
+on:
+  schedule:
+    - cron: '17 3 * * 1,4'
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Supabase REST endpoint
+        run: |
+          if [ -z "${{ secrets.VITE_SUPABASE_URL }}" ]; then
+            echo "Secrets not configured yet — skipping."
+            exit 0
+          fi
+          curl -fsS "${{ secrets.VITE_SUPABASE_URL }}/rest/v1/profiles?select=id&limit=1" \
+            -H "apikey: ${{ secrets.VITE_SUPABASE_ANON_KEY }}" \
+            -H "Authorization: Bearer ${{ secrets.VITE_SUPABASE_ANON_KEY }}" \
+            > /dev/null && echo "Pinged OK"

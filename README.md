@@ -1,32 +1,72 @@
-# React + TypeScript + Vite
+# Expense Tracker
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+Personal income & expense tracker — free to run forever: a static React app on **GitHub Pages** backed by a free-tier **Supabase** project you own. Fully responsive, installable as a mobile app (PWA), light/dark theme.
 
-Currently, two official plugins are available:
+**Live app:** https://aswinlegarcon.github.io/expense_tracker/
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Features
 
-## React Compiler
+- **Transactions** — quick-add from anywhere (+ button), income & expenses, categories with emoji + colour, notes, date grouping, day subtotals, month pager, filters (type / category), search, edit & delete
+- **Dashboard** — this-month spent / income / net savings, spending-by-category donut, 6-month income-vs-expense bars, cumulative spending-pace line vs last month, and a **month-over-month category comparison where categories that increased are bolded, tinted red, and sorted first**
+- **Budgets** — overall + per-category monthly budgets with progress bars and over-budget callouts
+- **Recurring transactions** — weekly / monthly / yearly rules (rent, salary, subscriptions) that post themselves when you open the app; month-end anchors handled (a "31st" rule posts Feb 28, then back to the 31st); missed periods backfill; double-posting is impossible even with two devices open (row-locked RPC)
+- **Data tools** — CSV export, full JSON backup, JSON restore
+- **Settings** — currency (synced, `en-IN` digit grouping), theme (system / light / dark), category manager with archiving
+- **PWA** — installable on Android/iOS/desktop, app-shell cached; data requires being online
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Tech
 
-## Expanding the Oxlint configuration
+Vite + React 19 + TypeScript · Tailwind CSS v4 · TanStack Query v5 · Recharts · Supabase (Postgres + Auth, `@supabase/supabase-js`) · vite-plugin-pwa. Deployed to GitHub Pages by `.github/workflows/deploy.yml` on every push to `main`.
 
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
+All data lives in **your** Supabase project, isolated by Postgres Row Level Security; the only credentials in the build are the project URL and the anon (publishable) key, which are designed to be public — RLS is the security boundary.
 
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+## One-time setup
+
+### 1. Create the Supabase project
+
+1. Sign up / sign in at [supabase.com](https://supabase.com) (free).
+2. **New project** → name it anything (e.g. `expense-tracker`), pick a strong DB password (you won't need it day-to-day), choose a nearby region (e.g. Mumbai) → **Create**.
+
+### 2. Create the database schema
+
+1. In the project sidebar: **SQL Editor** → **New query**.
+2. Paste the entire contents of [`supabase/schema.sql`](supabase/schema.sql) → **Run**.
+   The script is idempotent — safe to run again after future updates.
+
+### 3. Configure auth (single-user, no public signups)
+
+1. **Authentication → Sign In / Up → Email**: turn **off** "Confirm email".
+2. **Authentication → Users → Add user**: your email + a strong password, tick **Auto Confirm User**.
+   (Creating the user *after* the schema means the signup trigger seeds your default categories; the app also self-heals if you did it in the other order.)
+3. Back in **Sign In / Up**: turn **off** "Allow new users to sign up" — nobody else can register against your project.
+
+### 4. Wire the app to your project
+
+1. **Project Settings → API** (or "Data API"): copy the **Project URL** and the **anon / publishable key**.
+2. In the GitHub repo: **Settings → Secrets and variables → Actions → New repository secret**, twice:
+   - `VITE_SUPABASE_URL` = the project URL
+   - `VITE_SUPABASE_ANON_KEY` = the anon/publishable key
+3. Re-run the deploy: **Actions → deploy → Run workflow** (or just push any commit).
+4. Open https://aswinlegarcon.github.io/expense_tracker/ and sign in. Done.
+
+## Local development
+
+```bash
+npm install
+cp .env.example .env.local   # fill in the same two values
+npm run dev                  # http://localhost:5173/expense_tracker/
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+`npm run build` type-checks and produces `dist/`.
+
+You can also run a fully local backend with Docker via the Supabase CLI: `npx supabase start`, then point `.env.local` at the printed local URL/key and apply `supabase/schema.sql` once.
+
+## Operational notes
+
+- **Free-tier pause:** Supabase pauses free projects after ~1 week with no API traffic. The `keepalive` workflow pings it twice a week to prevent that. If it ever pauses anyway, restore it with one click in the Supabase dashboard — no data is lost. (GitHub itself disables cron workflows after ~60 days without repo activity; any commit re-enables them.)
+- **Backups:** Settings → "Download backup" exports everything as JSON; "Import backup" restores it into a fresh account (additive; no de-duplication).
+- **Never** put the `service_role` key anywhere near this repo or the app — the anon key is the only one the client should ever see.
+
+## Data model
+
+`profiles` (currency) · `categories` (emoji, colour, archived) · `transactions` (type, amount, category, date, note) · `budgets` (per-category or overall monthly amount) · `recurring_rules` (frequency, anchor date, next occurrence). Every table is RLS-protected to the signed-in user; recurring posting runs in a single atomic RPC (`post_due_recurring`).
