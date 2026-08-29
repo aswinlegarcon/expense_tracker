@@ -25,3 +25,7 @@ dist-ssr
 
 # Claude Code local tooling
 .claude/
+
+# Supabase CLI local-dev artifacts
+supabase/.temp/
+supabase/.branches/
