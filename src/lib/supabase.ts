@@ -1,7 +1,21 @@
 import { createClient } from '@supabase/supabase-js'
 
-const url = import.meta.env.VITE_SUPABASE_URL as string | undefined
+const rawUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined
 const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined
+
+// Normalize to the bare origin: people paste the REST/auth endpoint or add a
+// trailing slash, which makes every API path resolve wrong ("Invalid path
+// specified in request URL"). supabase.co and the local CLI always serve from
+// the origin root, so the origin is the correct client URL in all our cases.
+function toOrigin(u: string | undefined): string | undefined {
+  if (!u) return undefined
+  try {
+    return new URL(u).origin
+  } catch {
+    return undefined
+  }
+}
+const url = toOrigin(rawUrl)
 
 /** False until the two VITE_SUPABASE_* env vars are provided (repo secrets in CI,
  *  .env.local for dev). The app shows a setup notice instead of crashing. */
