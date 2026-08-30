@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
-import type { Frequency, TxType } from '../types'
+import type { CategoryKind, Frequency, PaymentMethod, TxType } from '../types'
 
 function useInvalidating<TArgs>(keys: string[][], fn: (args: TArgs) => Promise<void>) {
   const qc = useQueryClient()
@@ -21,29 +21,33 @@ export interface TxInput {
   type: TxType
   amount: number
   category_id: string | null
+  payment_method: PaymentMethod
   occurred_on: string
   note: string
 }
 
+// Any transaction write can move the card balance, so refresh it alongside ['tx'].
+const TX_KEYS = [['tx'], ['credit']]
+
 export function useAddTransaction() {
-  return useInvalidating([['tx']], (input: TxInput) => run(supabase.from('transactions').insert(input)))
+  return useInvalidating(TX_KEYS, (input: TxInput) => run(supabase.from('transactions').insert(input)))
 }
 
 export function useUpdateTransaction() {
-  return useInvalidating([['tx']], ({ id, ...input }: TxInput & { id: string }) =>
+  return useInvalidating(TX_KEYS, ({ id, ...input }: TxInput & { id: string }) =>
     run(supabase.from('transactions').update(input).eq('id', id)),
   )
 }
 
 export function useDeleteTransaction() {
-  return useInvalidating([['tx']], (id: string) => run(supabase.from('transactions').delete().eq('id', id)))
+  return useInvalidating(TX_KEYS, (id: string) => run(supabase.from('transactions').delete().eq('id', id)))
 }
 
 // ---------- categories ----------
 
 export interface CategoryInput {
   name: string
-  kind: TxType
+  kind: CategoryKind
   icon: string
   color: string
 }
@@ -77,9 +81,10 @@ export function useDeleteBudget() {
 // ---------- recurring rules ----------
 
 export interface RecurringInput {
-  type: TxType
+  type: CategoryKind
   amount: number
   category_id: string | null
+  payment_method: PaymentMethod
   note: string
   frequency: Frequency
   start_date: string

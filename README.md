@@ -6,7 +6,8 @@ Personal income & expense tracker — free to run forever: a static React app on
 
 ## Features
 
-- **Transactions** — quick-add from anywhere (+ button), income & expenses, categories with emoji + colour, notes, date grouping, day subtotals, month pager, filters (type / category), search, edit & delete
+- **Transactions** — quick-add from anywhere (+ button), income & expenses, **cash vs credit-card** on every expense, categories with emoji + colour, notes, date grouping, day subtotals, month pager, filters (type / payment method / category), search, edit & delete
+- **Credit card tracking** — mark spends as Credit, and the card panel shows what you still owe. Record the bill payment ("Card bill" type, with a *Pay full* shortcut) and the outstanding drops to zero with an **"All settled — bill tallies"** badge. Bill payments are **transfers, not spending**: they never appear in totals, charts or budgets, so a card purchase is counted once when you charge it, not again when you pay the bill
 - **Dashboard** — this-month spent / income / net savings, spending-by-category donut, 6-month income-vs-expense bars, cumulative spending-pace line vs last month, and a **month-over-month category comparison where categories that increased are bolded, tinted red, and sorted first**
 - **Budgets** — overall + per-category monthly budgets with progress bars and over-budget callouts
 - **Recurring transactions** — weekly / monthly / yearly rules (rent, salary, subscriptions) that post themselves when you open the app; month-end anchors handled (a "31st" rule posts Feb 28, then back to the 31st); missed periods backfill; double-posting is impossible even with two devices open (row-locked RPC)
@@ -69,4 +70,8 @@ You can also run a fully local backend with Docker via the Supabase CLI: `npx su
 
 ## Data model
 
-`profiles` (currency) · `categories` (emoji, colour, archived) · `transactions` (type, amount, category, date, note) · `budgets` (per-category or overall monthly amount) · `recurring_rules` (frequency, anchor date, next occurrence). Every table is RLS-protected to the signed-in user; recurring posting runs in a single atomic RPC (`post_due_recurring`).
+`profiles` (currency) · `categories` (emoji, colour, archived) · `transactions` (type, amount, category, payment method, date, note) · `budgets` (per-category or overall monthly amount) · `recurring_rules` (frequency, anchor date, next occurrence). Every table is RLS-protected to the signed-in user; recurring posting runs in a single atomic RPC (`post_due_recurring`).
+
+A transaction's `type` is `expense`, `income`, or `card_payment`. `payment_method` is `cash` (money left immediately — cash, UPI, debit) or `credit` (charged to the card). Card outstanding = every `credit` expense minus every `card_payment`, computed over all history by the `credit_summary` RPC so the balance carries across months and always tallies.
+
+**Re-running the schema:** `supabase/schema.sql` stays a single idempotent file. Columns and constraints added after the first release are repeated as guarded `alter` statements below the table definitions, so pasting the whole file again upgrades an existing project without touching your data.

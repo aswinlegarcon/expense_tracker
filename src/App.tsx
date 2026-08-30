@@ -59,7 +59,7 @@ function AuthedApp({ session }: { session: Session }) {
       {route === 'settings' && <SettingsPage currency={currency} />}
 
       <Sheet open={quickAdd} onClose={() => setQuickAdd(false)} title="Add transaction">
-        <TransactionForm categories={categories} onDone={() => setQuickAdd(false)} />
+        <TransactionForm categories={categories} currency={currency} onDone={() => setQuickAdd(false)} />
       </Sheet>
     </AppShell>
   )

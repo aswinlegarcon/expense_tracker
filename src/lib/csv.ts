@@ -40,12 +40,13 @@ function download(filename: string, content: string, type: string) {
 export async function exportTransactionsCSV(categories: Category[]) {
   const tx = await fetchAll<Transaction>('transactions', 'occurred_on')
   const catById = new Map(categories.map((c) => [c.id, c]))
-  const header = 'date,type,category,amount,note,recurring'
+  const header = 'date,type,category,paid_with,amount,note,recurring'
   const rows = tx.map((t) =>
     [
       csvCell(t.occurred_on),
-      csvCell(t.type),
+      csvCell(t.type === 'card_payment' ? 'card bill payment' : t.type),
       csvCell(t.category_id ? (catById.get(t.category_id)?.name ?? '') : ''),
+      csvCell(t.type === 'expense' ? t.payment_method : ''),
       csvCell(t.amount),
       csvCell(t.note),
       csvCell(t.recurring_rule_id ? 'yes' : ''),
@@ -66,6 +67,7 @@ export interface BackupFile {
     amount: number
     occurred_on: string
     note: string
+    payment_method: string
     category: string | null // name; ids don't survive account moves
     category_kind: string
   }[]
@@ -74,6 +76,7 @@ export interface BackupFile {
     type: string
     amount: number
     category: string | null
+    payment_method: string
     note: string
     frequency: string
     start_date: string
@@ -111,6 +114,7 @@ export async function exportBackupJSON(profile: Profile | undefined) {
       amount: t.amount,
       occurred_on: t.occurred_on,
       note: t.note,
+      payment_method: t.payment_method,
       category: name(t.category_id),
       category_kind: t.type,
     })),
@@ -119,6 +123,7 @@ export async function exportBackupJSON(profile: Profile | undefined) {
       type: r.type,
       amount: r.amount,
       category: name(r.category_id),
+      payment_method: r.payment_method,
       note: r.note,
       frequency: r.frequency,
       start_date: r.start_date,
@@ -153,11 +158,13 @@ export async function importBackupJSON(file: File): Promise<{ transactions: numb
   if (catErr) throw new Error(catErr.message)
   const idByKey = new Map((cats as Category[]).map((c) => [`${c.kind}:${c.name}`, c.id]))
 
+  // Backups written before cash/credit tracking have no payment_method — treat as cash.
   const txRows = parsed.transactions.map((t) => ({
     type: t.type,
     amount: t.amount,
     occurred_on: t.occurred_on,
     note: t.note ?? '',
+    payment_method: t.type === 'expense' && t.payment_method === 'credit' ? 'credit' : 'cash',
     category_id: t.category ? (idByKey.get(`${t.type}:${t.category}`) ?? null) : null,
   }))
   for (let i = 0; i < txRows.length; i += 500) {
@@ -175,6 +182,7 @@ export async function importBackupJSON(file: File): Promise<{ transactions: numb
     type: r.type,
     amount: r.amount,
     category_id: r.category ? (idByKey.get(`${r.type}:${r.category}`) ?? null) : null,
+    payment_method: r.type === 'expense' && r.payment_method === 'credit' ? 'credit' : 'cash',
     note: r.note ?? '',
     frequency: r.frequency,
     start_date: r.start_date,

@@ -4,11 +4,11 @@ import Sheet from '../../components/Sheet'
 import { useToast } from '../../components/Toast'
 import { useAddCategory, useUpdateCategory } from '../../data/mutations'
 import { useCategories } from '../../data/queries'
-import type { Category, TxType } from '../../types'
+import type { Category, CategoryKind } from '../../types'
 
 export default function CategoryManager() {
   const { data: categories = [] } = useCategories()
-  const [kind, setKind] = useState<TxType>('expense')
+  const [kind, setKind] = useState<CategoryKind>('expense')
   const [editing, setEditing] = useState<Category | null>(null)
   const [adding, setAdding] = useState(false)
   const update = useUpdateCategory()
@@ -103,7 +103,7 @@ export default function CategoryManager() {
   )
 }
 
-function CategoryForm({ kind, existing, onDone }: { kind: TxType; existing?: Category; onDone: () => void }) {
+function CategoryForm({ kind, existing, onDone }: { kind: CategoryKind; existing?: Category; onDone: () => void }) {
   const [name, setName] = useState(existing?.name ?? '')
   const [icon, setIcon] = useState(existing?.icon ?? '🏷️')
   const [color, setColor] = useState(existing?.color ?? '#64748b')

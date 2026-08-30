@@ -1,5 +1,5 @@
 import { ArrowDownRight, ArrowUpRight, LayoutDashboard, PiggyBank, TrendingDown, TrendingUp } from 'lucide-react'
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import {
   Bar,
   BarChart,
@@ -15,13 +15,17 @@ import {
   YAxis,
 } from 'recharts'
 import EmptyState from '../../components/EmptyState'
+import Sheet from '../../components/Sheet'
 import StatCard from '../../components/StatCard'
-import { useCategories, useTransactions } from '../../data/queries'
+import { useCategories, useCreditSummary, useTransactions } from '../../data/queries'
 import { formatMonth, formatShortMonth, monthEndISO, monthKey, monthStartISO } from '../../lib/dates'
 import { formatMoney, formatMoneyCompact, round2 } from '../../lib/money'
+import TransactionForm from '../transactions/TransactionForm'
 import { ChartCard, ChartTip, LegendChips } from './ChartBits'
+import CreditCardPanel from './CreditCardPanel'
 import {
   categoryBreakdown,
+  creditMonthActivity,
   cumulativeByDay,
   momComparison,
   monthlyTotals,
@@ -35,6 +39,8 @@ export default function DashboardPage({ currency }: { currency: string }) {
   const to = useMemo(() => monthEndISO(monthStartISO(0)), [])
   const { data: tx = [], isLoading } = useTransactions(from, to)
   const { data: categories = [] } = useCategories()
+  const { data: credit } = useCreditSummary()
+  const [payingBill, setPayingBill] = useState(false)
 
   const catById = useMemo(() => new Map(categories.map((c) => [c.id, c])), [categories])
   const months = useMemo(
@@ -48,6 +54,11 @@ export default function DashboardPage({ currency }: { currency: string }) {
   const slices = useMemo(() => categoryBreakdown(tx, catById, curMonth), [tx, catById, curMonth])
   const mom = useMemo(() => momComparison(tx, catById, curMonth, prevMonth), [tx, catById, curMonth, prevMonth])
   const pace = useMemo(() => cumulativeByDay(tx, curMonth, prevMonth), [tx, curMonth, prevMonth])
+  const creditMonth = useMemo(() => creditMonthActivity(tx, curMonth), [tx, curMonth])
+
+  // Keep the dashboard clean for anyone who only ever pays cash.
+  const usesCredit =
+    !!credit && (credit.lifetime_charged > 0 || credit.lifetime_paid > 0 || creditMonth.charged > 0)
 
   const cur = totals[WINDOW - 1]
   const prev = totals[WINDOW - 2]
@@ -106,6 +117,15 @@ export default function DashboardPage({ currency }: { currency: string }) {
         />
       </div>
 
+      {usesCredit && credit && (
+        <CreditCardPanel
+          summary={credit}
+          month={creditMonth}
+          currency={currency}
+          onPayBill={() => setPayingBill(true)}
+        />
+      )}
+
       {tx.length === 0 ? (
         <EmptyState
           icon={LayoutDashboard}
@@ -120,6 +140,15 @@ export default function DashboardPage({ currency }: { currency: string }) {
           <PaceLines pace={pace} currency={currency} curMonth={curMonth} prevMonth={prevMonth} />
         </div>
       )}
+
+      <Sheet open={payingBill} onClose={() => setPayingBill(false)} title="Pay credit card bill">
+        <TransactionForm
+          categories={categories}
+          initialType="card_payment"
+          currency={currency}
+          onDone={() => setPayingBill(false)}
+        />
+      </Sheet>
     </div>
   )
 }

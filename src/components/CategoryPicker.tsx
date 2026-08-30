@@ -1,8 +1,8 @@
-import type { Category, TxType } from '../types'
+import type { Category, CategoryKind } from '../types'
 
 interface Props {
   categories: Category[]
-  kind: TxType
+  kind: CategoryKind
   value: string | null
   onChange: (id: string) => void
 }

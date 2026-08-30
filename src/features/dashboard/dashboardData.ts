@@ -36,8 +36,9 @@ export function monthlyTotals(tx: Transaction[], months: string[]): MonthTotals[
   for (const t of tx) {
     const row = map.get(monthKey(t.occurred_on))
     if (!row) continue
+    // card_payment is a transfer, not income or spending — it must fall through
     if (t.type === 'income') row.income += t.amount
-    else row.expense += t.amount
+    else if (t.type === 'expense') row.expense += t.amount
   }
   return months.map((m) => {
     const r = map.get(m)!
@@ -136,6 +137,18 @@ export function momComparison(
     if (aUp !== bUp) return aUp ? -1 : 1
     return Math.abs(b.current - b.previous) - Math.abs(a.current - a.previous)
   })
+}
+
+/** Credit-card activity within a single month, for the card panel. */
+export function creditMonthActivity(tx: Transaction[], month: string): { charged: number; paid: number } {
+  let charged = 0
+  let paid = 0
+  for (const t of tx) {
+    if (monthKey(t.occurred_on) !== month) continue
+    if (t.type === 'expense' && t.payment_method === 'credit') charged += t.amount
+    else if (t.type === 'card_payment') paid += t.amount
+  }
+  return { charged: round2(charged), paid: round2(paid) }
 }
 
 /** Cumulative expense by day-of-month for two months (for the pace chart). */

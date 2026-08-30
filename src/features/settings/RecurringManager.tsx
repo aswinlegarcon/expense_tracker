@@ -9,7 +9,7 @@ import { useAddRecurring, useDeleteRecurring, useUpdateRecurring } from '../../d
 import { useCategories, useRecurring } from '../../data/queries'
 import { formatFullDate, todayISO } from '../../lib/dates'
 import { formatMoney } from '../../lib/money'
-import type { Frequency, RecurringRule, TxType } from '../../types'
+import type { CategoryKind, Frequency, PaymentMethod, RecurringRule } from '../../types'
 
 export default function RecurringManager({ currency }: { currency: string }) {
   const { data: rules = [] } = useRecurring()
@@ -58,6 +58,11 @@ export default function RecurringManager({ currency }: { currency: string }) {
                     <span className="block truncate text-sm font-medium">
                       {r.note || cat?.name || 'Recurring'}
                       <span className="ml-1.5 text-[10px] text-slate-400 uppercase">{r.frequency}</span>
+                    {r.type === 'expense' && r.payment_method === 'credit' && (
+                      <span className="ml-1.5 rounded-full bg-violet-100 px-1.5 py-px text-[9px] font-bold tracking-wide text-violet-700 uppercase dark:bg-violet-950/60 dark:text-violet-300">
+                        Credit
+                      </span>
+                    )}
                     </span>
                     <span className="text-xs text-slate-400 dark:text-slate-500">
                       {r.is_active ? `next ${formatFullDate(r.next_occurrence)}` : 'paused'}
@@ -110,9 +115,10 @@ function RecurringForm({
   onDone: () => void
 }) {
   const { data: categories = [] } = useCategories()
-  const [type, setType] = useState<TxType>(existing?.type ?? 'expense')
+  const [type, setType] = useState<CategoryKind>(existing?.type ?? 'expense')
   const [amount, setAmount] = useState(existing ? String(existing.amount) : '')
   const [categoryId, setCategoryId] = useState<string | null>(existing?.category_id ?? null)
+  const [method, setMethod] = useState<PaymentMethod>(existing?.payment_method ?? 'cash')
   const [note, setNote] = useState(existing?.note ?? '')
   const [frequency, setFrequency] = useState<Frequency>(existing?.frequency ?? 'monthly')
   const [startDate, setStartDate] = useState(existing?.start_date ?? todayISO())
@@ -126,7 +132,7 @@ function RecurringForm({
   const toast = useToast()
   const busy = add.isPending || update.isPending || del.isPending
 
-  function switchType(t: TxType) {
+  function switchType(t: CategoryKind) {
     setType(t)
     if (categoryId && categories.find((c) => c.id === categoryId)?.kind !== t) setCategoryId(null)
   }
@@ -142,6 +148,7 @@ function RecurringForm({
       type,
       amount: value,
       category_id: categoryId,
+      payment_method: type === 'expense' ? method : ('cash' as const),
       note: note.trim(),
       frequency,
       start_date: startDate,
@@ -222,6 +229,26 @@ function RecurringForm({
           </select>
         </label>
       </div>
+
+      {type === 'expense' && (
+        <div>
+          <span className="mb-1.5 block text-sm font-medium">Paid with</span>
+          <div className="grid grid-cols-2 rounded-lg bg-slate-100 p-1 dark:bg-slate-800">
+            {(['cash', 'credit'] as const).map((m) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => setMethod(m)}
+                className={`rounded-md py-1.5 text-xs font-semibold capitalize ${
+                  method === m ? 'bg-white shadow-sm dark:bg-slate-900' : 'text-slate-500 dark:text-slate-400'
+                }`}
+              >
+                {m}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div>
         <span className="mb-1.5 block text-sm font-medium">Category</span>

@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import type { ISODate } from '../lib/dates'
 import { supabase } from '../lib/supabase'
-import type { Budget, Category, Profile, RecurringRule, Transaction } from '../types'
+import type { Budget, Category, CreditSummary, Profile, RecurringRule, Transaction } from '../types'
 
 async function throwing<T>(p: PromiseLike<{ data: T | null; error: { message: string } | null }>): Promise<T> {
   const { data, error } = await p
@@ -48,6 +48,27 @@ export function useBudgets() {
   return useQuery({
     queryKey: ['budgets'],
     queryFn: () => throwing<Budget[]>(supabase.from('budgets').select('*')),
+  })
+}
+
+/** Card balance across all history — a date window would not tally. */
+export function useCreditSummary() {
+  return useQuery({
+    queryKey: ['credit'],
+    queryFn: async (): Promise<CreditSummary> => {
+      const { data, error } = await supabase.rpc('credit_summary')
+      if (error) throw new Error(error.message)
+      const row = (Array.isArray(data) ? data[0] : data) as CreditSummary | undefined
+      return (
+        row ?? {
+          outstanding: 0,
+          lifetime_charged: 0,
+          lifetime_paid: 0,
+          last_paid_on: null,
+          last_paid_amount: null,
+        }
+      )
+    },
   })
 }
 

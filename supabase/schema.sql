@@ -33,6 +33,7 @@ create table if not exists public.recurring_rules (
   type            text not null check (type in ('expense','income')),
   amount          numeric(12,2) not null check (amount > 0),
   category_id     uuid references public.categories(id) on delete set null,
+  payment_method  text not null default 'cash',
   note            text not null default '',
   frequency       text not null check (frequency in ('weekly','monthly','yearly')),
   start_date      date not null,          -- carries the anchor day-of-month (e.g. 31)
@@ -50,6 +51,7 @@ create table if not exists public.transactions (
   type              text not null check (type in ('expense','income')),
   amount            numeric(12,2) not null check (amount > 0),
   category_id       uuid references public.categories(id) on delete set null,
+  payment_method    text not null default 'cash',
   occurred_on       date not null,        -- DATE (not timestamptz): no timezone off-by-one
   note              text not null default '',
   recurring_rule_id uuid references public.recurring_rules(id) on delete set null,
@@ -67,6 +69,33 @@ create table if not exists public.budgets (
   updated_at  timestamptz not null default now(),
   unique nulls not distinct (user_id, category_id)
 );
+
+-- ============================================================================
+-- Upgrades for databases created before a feature was added. The create-table
+-- statements above only run on a fresh project, so every later column or
+-- constraint change is repeated here as a guarded alter.
+-- ============================================================================
+
+-- Cash vs credit-card spending, and credit-card bill payments.
+alter table public.transactions    add column if not exists payment_method text not null default 'cash';
+alter table public.recurring_rules add column if not exists payment_method text not null default 'cash';
+
+alter table public.transactions    drop constraint if exists transactions_payment_method_check;
+alter table public.transactions    add  constraint transactions_payment_method_check
+  check (payment_method in ('cash','credit'));
+alter table public.recurring_rules drop constraint if exists recurring_rules_payment_method_check;
+alter table public.recurring_rules add  constraint recurring_rules_payment_method_check
+  check (payment_method in ('cash','credit'));
+
+-- 'card_payment' settles the card; it is a transfer, never counted as spending.
+alter table public.transactions drop constraint if exists transactions_type_check;
+alter table public.transactions add  constraint transactions_type_check
+  check (type in ('expense','income','card_payment'));
+
+-- A bill payment leaves your bank/cash, so it can never itself be 'credit'.
+alter table public.transactions drop constraint if exists transactions_card_payment_check;
+alter table public.transactions add  constraint transactions_card_payment_check
+  check (type <> 'card_payment' or payment_method = 'cash');
 
 -- Indexes for the hot paths (per-user month-range scans)
 create index if not exists transactions_user_date_idx     on public.transactions (user_id, occurred_on desc);
@@ -178,8 +207,8 @@ begin
     while r.next_occurrence <= p_today
           and (r.end_date is null or r.next_occurrence <= r.end_date)
           and guard < 120 loop            -- cap missed-period backfill
-      insert into public.transactions (user_id, type, amount, category_id, occurred_on, note, recurring_rule_id)
-      values (r.user_id, r.type, r.amount, r.category_id, r.next_occurrence, r.note, r.id);
+      insert into public.transactions (user_id, type, amount, category_id, payment_method, occurred_on, note, recurring_rule_id)
+      values (r.user_id, r.type, r.amount, r.category_id, r.payment_method, r.next_occurrence, r.note, r.id);
       r.next_occurrence := public.advance_occurrence(r.next_occurrence, r.frequency,
                                                      extract(day from r.start_date)::int);
       posted := posted + 1; guard := guard + 1;
@@ -191,3 +220,33 @@ begin
   end loop;
   return posted;
 end $$;
+
+-- ============ credit card: outstanding balance and settlement state =========
+-- Outstanding = everything ever charged to the card minus every bill payment.
+-- Computed over all history (not a date window) so the balance always tallies.
+create or replace function public.credit_summary()
+returns table (
+  outstanding      numeric,
+  lifetime_charged numeric,
+  lifetime_paid    numeric,
+  last_paid_on     date,
+  last_paid_amount numeric
+)
+language sql security invoker stable set search_path = public as $$
+  with totals as (
+    select
+      coalesce(sum(amount) filter (where type = 'expense' and payment_method = 'credit'), 0) as charged,
+      coalesce(sum(amount) filter (where type = 'card_payment'), 0)                          as paid
+    from public.transactions
+    where user_id = auth.uid()
+  ),
+  last_payment as (
+    select occurred_on, amount
+    from public.transactions
+    where user_id = auth.uid() and type = 'card_payment'
+    order by occurred_on desc, created_at desc
+    limit 1
+  )
+  select t.charged - t.paid, t.charged, t.paid, lp.occurred_on, lp.amount
+  from totals t left join last_payment lp on true;
+$$;

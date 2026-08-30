@@ -1,18 +1,27 @@
-import { ChevronLeft, ChevronRight, ReceiptText, Repeat, Search } from 'lucide-react'
+import { ChevronLeft, ChevronRight, CreditCard, ReceiptText, Repeat, Search } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import EmptyState from '../../components/EmptyState'
 import Sheet from '../../components/Sheet'
 import { useCategories, useTransactions } from '../../data/queries'
 import { formatDay, formatMonth, monthEndISO, monthKey, monthStartISO, todayISO, type ISODate } from '../../lib/dates'
 import { formatMoney, round2 } from '../../lib/money'
-import type { Category, Transaction, TxType } from '../../types'
+import type { Category, PaymentMethod, Transaction, TxType } from '../../types'
 import TransactionForm from './TransactionForm'
 
 type TypeFilter = 'all' | TxType
+type MethodFilter = 'all' | PaymentMethod
+
+const TYPE_FILTERS: { value: TypeFilter; label: string }[] = [
+  { value: 'all', label: 'All' },
+  { value: 'expense', label: 'Expense' },
+  { value: 'income', label: 'Income' },
+  { value: 'card_payment', label: 'Card bill' },
+]
 
 export default function TransactionsPage({ currency }: { currency: string }) {
   const [monthStart, setMonthStart] = useState<ISODate>(monthStartISO(0))
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all')
+  const [methodFilter, setMethodFilter] = useState<MethodFilter>('all')
   const [categoryFilter, setCategoryFilter] = useState<string>('all')
   const [search, setSearch] = useState('')
   const [editing, setEditing] = useState<Transaction | null>(null)
@@ -28,6 +37,8 @@ export default function TransactionsPage({ currency }: { currency: string }) {
     const q = search.trim().toLowerCase()
     return (transactions ?? []).filter((t) => {
       if (typeFilter !== 'all' && t.type !== typeFilter) return false
+      // a bill payment has no payment method of its own — hide it when filtering by one
+      if (methodFilter !== 'all' && (t.type !== 'expense' || t.payment_method !== methodFilter)) return false
       if (categoryFilter !== 'all' && t.category_id !== categoryFilter) return false
       if (q) {
         const cat = t.category_id ? catById.get(t.category_id)?.name.toLowerCase() : ''
@@ -35,7 +46,7 @@ export default function TransactionsPage({ currency }: { currency: string }) {
       }
       return true
     })
-  }, [transactions, typeFilter, categoryFilter, search, catById])
+  }, [transactions, typeFilter, methodFilter, categoryFilter, search, catById])
 
   const groups = useMemo(() => {
     const byDay = new Map<string, Transaction[]>()
@@ -77,15 +88,30 @@ export default function TransactionsPage({ currency }: { currency: string }) {
       {/* filters */}
       <div className="flex flex-wrap items-center gap-2">
         <div className="flex rounded-lg bg-slate-200/70 p-0.5 dark:bg-slate-800">
-          {(['all', 'expense', 'income'] as const).map((t) => (
+          {TYPE_FILTERS.map((t) => (
             <button
-              key={t}
-              onClick={() => setTypeFilter(t)}
-              className={`rounded-md px-3 py-1.5 text-xs font-semibold capitalize ${
-                typeFilter === t ? 'bg-white shadow-sm dark:bg-slate-900' : 'text-slate-500 dark:text-slate-400'
+              key={t.value}
+              onClick={() => setTypeFilter(t.value)}
+              className={`rounded-md px-2.5 py-1.5 text-xs font-semibold ${
+                typeFilter === t.value
+                  ? 'bg-white shadow-sm dark:bg-slate-900'
+                  : 'text-slate-500 dark:text-slate-400'
               }`}
             >
-              {t}
+              {t.label}
+            </button>
+          ))}
+        </div>
+        <div className="flex rounded-lg bg-slate-200/70 p-0.5 dark:bg-slate-800">
+          {(['all', 'cash', 'credit'] as const).map((m) => (
+            <button
+              key={m}
+              onClick={() => setMethodFilter(m)}
+              className={`rounded-md px-2.5 py-1.5 text-xs font-semibold capitalize ${
+                methodFilter === m ? 'bg-white shadow-sm dark:bg-slate-900' : 'text-slate-500 dark:text-slate-400'
+              }`}
+            >
+              {m === 'all' ? 'Any pay' : m}
             </button>
           ))}
         </div>
@@ -144,7 +170,14 @@ export default function TransactionsPage({ currency }: { currency: string }) {
       )}
 
       <Sheet open={!!editing} onClose={() => setEditing(null)} title="Edit transaction">
-        {editing && <TransactionForm categories={categories} existing={editing} onDone={() => setEditing(null)} />}
+        {editing && (
+          <TransactionForm
+            categories={categories}
+            existing={editing}
+            currency={currency}
+            onDone={() => setEditing(null)}
+          />
+        )}
       </Sheet>
     </div>
   )
@@ -177,6 +210,7 @@ function DayGroup({
       </div>
       <div className="divide-y divide-slate-100 overflow-hidden rounded-2xl border border-slate-200 bg-white dark:divide-slate-800 dark:border-slate-800 dark:bg-slate-900">
         {items.map((t) => {
+          const isBill = t.type === 'card_payment'
           const cat = t.category_id ? catById.get(t.category_id) : undefined
           return (
             <button
@@ -186,23 +220,32 @@ function DayGroup({
             >
               <span
                 className="flex size-9 shrink-0 items-center justify-center rounded-full text-base"
-                style={{ backgroundColor: `${cat?.color ?? '#64748b'}26` }}
+                style={{ backgroundColor: isBill ? '#8b5cf626' : `${cat?.color ?? '#64748b'}26` }}
               >
-                {cat?.icon ?? '🏷️'}
+                {isBill ? <CreditCard className="size-4 text-violet-600 dark:text-violet-400" /> : (cat?.icon ?? '🏷️')}
               </span>
               <span className="min-w-0 flex-1">
                 <span className="flex items-center gap-1.5 truncate text-sm font-medium">
-                  {cat?.name ?? 'Uncategorised'}
+                  {isBill ? 'Credit card bill' : (cat?.name ?? 'Uncategorised')}
                   {t.recurring_rule_id && <Repeat className="size-3 shrink-0 text-slate-400" />}
+                  {t.type === 'expense' && t.payment_method === 'credit' && (
+                    <span className="shrink-0 rounded-full bg-violet-100 px-1.5 py-px text-[9px] font-bold tracking-wide text-violet-700 uppercase dark:bg-violet-950/60 dark:text-violet-300">
+                      Credit
+                    </span>
+                  )}
                 </span>
                 {t.note && <span className="block truncate text-xs text-slate-400 dark:text-slate-500">{t.note}</span>}
               </span>
               <span
                 className={`shrink-0 text-sm font-semibold tabular-nums ${
-                  t.type === 'expense' ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400'
+                  isBill
+                    ? 'text-violet-600 dark:text-violet-400'
+                    : t.type === 'expense'
+                      ? 'text-red-600 dark:text-red-400'
+                      : 'text-emerald-600 dark:text-emerald-400'
                 }`}
               >
-                {t.type === 'expense' ? '−' : '+'}
+                {t.type === 'income' ? '+' : '−'}
                 {formatMoney(t.amount, currency)}
               </span>
             </button>
