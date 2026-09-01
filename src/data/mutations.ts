@@ -1,4 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { describeError } from '../lib/errors'
 import { supabase } from '../lib/supabase'
 import type { CategoryKind, Frequency, PaymentMethod, TxType } from '../types'
 
@@ -12,7 +13,7 @@ function useInvalidating<TArgs>(keys: string[][], fn: (args: TArgs) => Promise<v
 
 async function run(p: PromiseLike<{ error: { message: string } | null }>) {
   const { error } = await p
-  if (error) throw new Error(error.message)
+  if (error) throw new Error(describeError(error.message))
 }
 
 // ---------- transactions ----------

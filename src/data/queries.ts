@@ -1,11 +1,12 @@
 import { useQuery } from '@tanstack/react-query'
 import type { ISODate } from '../lib/dates'
+import { describeError } from '../lib/errors'
 import { supabase } from '../lib/supabase'
 import type { Budget, Category, CreditSummary, Profile, RecurringRule, Transaction } from '../types'
 
 async function throwing<T>(p: PromiseLike<{ data: T | null; error: { message: string } | null }>): Promise<T> {
   const { data, error } = await p
-  if (error) throw new Error(error.message)
+  if (error) throw new Error(describeError(error.message))
   return data as T
 }
 
@@ -57,7 +58,7 @@ export function useCreditSummary() {
     queryKey: ['credit'],
     queryFn: async (): Promise<CreditSummary> => {
       const { data, error } = await supabase.rpc('credit_summary')
-      if (error) throw new Error(error.message)
+      if (error) throw new Error(describeError(error.message))
       const row = (Array.isArray(data) ? data[0] : data) as CreditSummary | undefined
       return (
         row ?? {
