@@ -1,37 +1,63 @@
-import { Banknote, CreditCard, Loader2, Trash2 } from 'lucide-react'
+import {
+  ArrowDownToLine,
+  ArrowUpFromLine,
+  Banknote,
+  CreditCard,
+  LifeBuoy,
+  Loader2,
+  ShoppingBag,
+  Trash2,
+  TrendingUp,
+  Wallet,
+} from 'lucide-react'
 import { useState, type FormEvent } from 'react'
 import CategoryPicker from '../../components/CategoryPicker'
 import { useToast } from '../../components/Toast'
-import { useAddTransaction, useDeleteTransaction, useUpdateTransaction } from '../../data/mutations'
-import { useCreditSummary } from '../../data/queries'
+import { useAddCategory, useAddTransaction, useDeleteTransaction, useUpdateTransaction } from '../../data/mutations'
+import { useCreditSummary, useHasHoldings, useHoldings } from '../../data/queries'
 import { todayISO } from '../../lib/dates'
-import { formatMoney } from '../../lib/money'
+import { errorText } from '../../lib/errors'
+import { formatMoney, round2 } from '../../lib/money'
+import { STARTER_HOLDINGS, canUseCredit, kindOfType } from '../../lib/txKinds'
 import type { Category, PaymentMethod, Transaction, TxType } from '../../types'
 
 interface Props {
   categories: Category[]
   /** present = edit mode */
   existing?: Transaction
-  /** open the form straight in credit-card-bill mode */
+  /** open the form straight in a given mode, e.g. credit-card bill */
   initialType?: TxType
   currency?: string
   onDone: () => void
 }
 
-const TYPE_TABS: { value: TxType; label: string }[] = [
-  { value: 'expense', label: 'Expense' },
-  { value: 'income', label: 'Income' },
-  { value: 'card_payment', label: 'Card bill' },
+/** What the person is recording. Fund deposits and withdrawals share one mode with
+ *  a direction toggle, so switching direction keeps the chosen fund. */
+type Mode = 'expense' | 'income' | 'investment' | 'fund' | 'card_payment'
+type FundDirection = 'deposit' | 'withdraw'
+
+const MODES: { value: Mode; label: string; icon: typeof Wallet; activeClass: string }[] = [
+  { value: 'expense', label: 'Expense', icon: ShoppingBag, activeClass: 'text-red-600 dark:text-red-400' },
+  { value: 'income', label: 'Income', icon: Wallet, activeClass: 'text-emerald-600 dark:text-emerald-400' },
+  { value: 'investment', label: 'Invest', icon: TrendingUp, activeClass: 'text-indigo-600 dark:text-indigo-400' },
+  { value: 'fund', label: 'Fund', icon: LifeBuoy, activeClass: 'text-sky-600 dark:text-sky-400' },
+  { value: 'card_payment', label: 'Card bill', icon: CreditCard, activeClass: 'text-violet-600 dark:text-violet-400' },
 ]
 
-export default function TransactionForm({
-  categories,
-  existing,
-  initialType,
-  currency = 'INR',
-  onDone,
-}: Props) {
-  const [type, setType] = useState<TxType>(existing?.type ?? initialType ?? 'expense')
+function modeOf(type: TxType): Mode {
+  return type === 'fund_deposit' || type === 'fund_withdrawal' ? 'fund' : type
+}
+
+function typeOf(mode: Mode, direction: FundDirection): TxType {
+  if (mode === 'fund') return direction === 'deposit' ? 'fund_deposit' : 'fund_withdrawal'
+  return mode
+}
+
+export default function TransactionForm({ categories, existing, initialType, currency = 'INR', onDone }: Props) {
+  const [mode, setMode] = useState<Mode>(modeOf(existing?.type ?? initialType ?? 'expense'))
+  const [direction, setDirection] = useState<FundDirection>(
+    existing?.type === 'fund_withdrawal' ? 'withdraw' : 'deposit',
+  )
   const [amount, setAmount] = useState(existing ? String(existing.amount) : '')
   const [categoryId, setCategoryId] = useState<string | null>(existing?.category_id ?? null)
   const [method, setMethod] = useState<PaymentMethod>(existing?.payment_method ?? 'cash')
@@ -40,35 +66,63 @@ export default function TransactionForm({
   const [confirmDelete, setConfirmDelete] = useState(false)
 
   const toast = useToast()
+  const hasHoldings = useHasHoldings()
   const { data: credit } = useCreditSummary()
+  const { data: holdings = [] } = useHoldings()
   const add = useAddTransaction()
   const update = useUpdateTransaction()
   const del = useDeleteTransaction()
+  const addCategory = useAddCategory()
   const busy = add.isPending || update.isPending || del.isPending
 
-  const isBill = type === 'card_payment'
-  const outstanding = credit?.outstanding ?? 0
+  const modes = hasHoldings ? MODES : MODES.filter((m) => m.value !== 'investment' && m.value !== 'fund')
+  const type = typeOf(mode, direction)
+  const kind = kindOfType(type)
+  const isBill = mode === 'card_payment'
+  const isHolding = kind === 'investment' || kind === 'fund'
+  const options = categories.filter((c) => c.kind === kind && !c.is_archived)
 
-  function switchType(next: TxType) {
-    setType(next)
-    // categories are per-kind, and a bill payment has no category at all
-    if (next === 'card_payment') setCategoryId(null)
-    else if (categoryId && categories.find((c) => c.id === categoryId)?.kind !== next) setCategoryId(null)
+  // With a single fund or investment bucket there is nothing to choose: use it.
+  const chosenId = categoryId ?? (isHolding && options.length === 1 ? options[0].id : null)
+
+  // Fund balance as it would be without this entry, so editing a withdrawal
+  // doesn't warn about the very amount it already took out.
+  let available = holdings.find((h) => h.category_id === chosenId)?.balance ?? 0
+  if (existing && existing.category_id === chosenId) {
+    if (existing.type === 'fund_withdrawal') available += existing.amount
+    if (existing.type === 'fund_deposit') available -= existing.amount
+  }
+  available = round2(available)
+  const value = Math.round(parseFloat(amount) * 100) / 100
+  const overdraws = mode === 'fund' && direction === 'withdraw' && chosenId !== null && value > available + 0.005
+
+  function switchMode(next: Mode) {
+    setMode(next)
+    const nextKind = kindOfType(typeOf(next, direction))
+    // categories belong to one kind; a bill payment has none at all
+    if (categoryId && categories.find((c) => c.id === categoryId)?.kind !== nextKind) setCategoryId(null)
+  }
+
+  async function createStarter(starterKind: 'investment' | 'fund') {
+    try {
+      await addCategory.mutateAsync({ kind: starterKind, ...STARTER_HOLDINGS[starterKind], opening_balance: 0 })
+    } catch (err) {
+      toast(errorText(err), 'error')
+    }
   }
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
-    const value = Math.round(parseFloat(amount) * 100) / 100
     if (!Number.isFinite(value) || value <= 0) return toast('Enter a valid amount', 'error')
-    if (!isBill && !categoryId) return toast('Pick a category', 'error')
+    if (kind && !chosenId) return toast(mode === 'fund' ? 'Pick a fund' : 'Pick a category', 'error')
     if (!date) return toast('Pick a date', 'error')
 
     const input = {
       type,
       amount: value,
-      category_id: isBill ? null : categoryId,
-      // a bill payment leaves your bank, so it is never itself "credit"
-      payment_method: isBill || type === 'income' ? ('cash' as const) : method,
+      category_id: isBill ? null : chosenId,
+      // only types that can go on the card keep 'credit'; everything else left your bank
+      payment_method: canUseCredit(type) ? method : ('cash' as const),
       occurred_on: date,
       note: note.trim() || (isBill ? 'Credit card bill' : ''),
     }
@@ -77,7 +131,7 @@ export default function TransactionForm({
       else await add.mutateAsync(input)
       onDone()
     } catch (err) {
-      toast(err instanceof Error ? err.message : 'Failed to save', 'error')
+      toast(errorText(err), 'error')
     }
   }
 
@@ -87,30 +141,44 @@ export default function TransactionForm({
       await del.mutateAsync(existing.id)
       onDone()
     } catch (err) {
-      toast(err instanceof Error ? err.message : 'Failed to delete', 'error')
+      toast(errorText(err), 'error')
     }
   }
 
+  const outstanding = credit?.outstanding ?? 0
+  const submitLabel = existing
+    ? 'Save changes'
+    : isBill
+      ? 'Record payment'
+      : mode === 'investment'
+        ? 'Add investment'
+        : mode === 'fund'
+          ? direction === 'deposit'
+            ? 'Add to fund'
+            : 'Withdraw from fund'
+          : 'Add'
+
   return (
     <form onSubmit={onSubmit} className="space-y-5">
-      {/* type toggle */}
-      <div className="grid grid-cols-3 rounded-xl bg-slate-100 p-1 dark:bg-slate-800">
-        {TYPE_TABS.map((t) => (
+      {/* what is being recorded */}
+      <div
+        className={`grid gap-1 rounded-xl bg-slate-100 p-1 dark:bg-slate-800 ${
+          modes.length === 5 ? 'grid-cols-5' : 'grid-cols-3'
+        }`}
+      >
+        {modes.map((m) => (
           <button
-            key={t.value}
+            key={m.value}
             type="button"
-            onClick={() => switchType(t.value)}
-            className={`rounded-lg py-2 text-sm font-semibold transition-colors ${
-              type === t.value
-                ? t.value === 'expense'
-                  ? 'bg-white text-red-600 shadow-sm dark:bg-slate-900 dark:text-red-400'
-                  : t.value === 'income'
-                    ? 'bg-white text-emerald-600 shadow-sm dark:bg-slate-900 dark:text-emerald-400'
-                    : 'bg-white text-violet-600 shadow-sm dark:bg-slate-900 dark:text-violet-400'
+            onClick={() => switchMode(m.value)}
+            className={`flex flex-col items-center gap-0.5 rounded-lg px-0.5 py-1.5 text-[11px] font-semibold transition-colors ${
+              mode === m.value
+                ? `bg-white shadow-sm dark:bg-slate-900 ${m.activeClass}`
                 : 'text-slate-500 dark:text-slate-400'
             }`}
           >
-            {t.label}
+            <m.icon className="size-4" />
+            {m.label}
           </button>
         ))}
       </div>
@@ -141,6 +209,14 @@ export default function TransactionForm({
         </div>
       )}
 
+      {isHolding && (
+        <p className="-mt-2 text-[11px] leading-snug text-slate-500 dark:text-slate-400">
+          {mode === 'investment'
+            ? 'Investments are kept out of your spending — they show in their own section on the dashboard.'
+            : 'Fund money is kept out of your spending — the dashboard shows the fund’s running balance.'}
+        </p>
+      )}
+
       {/* amount */}
       <label className="block">
         <span className="mb-1.5 block text-sm font-medium">Amount</span>
@@ -158,19 +234,39 @@ export default function TransactionForm({
         />
       </label>
 
-      {/* paid with — only meaningful for expenses */}
-      {type === 'expense' && (
+      {/* fund: which way the money moves */}
+      {mode === 'fund' && (
+        <div className="grid grid-cols-2 gap-2">
+          <ChoiceButton
+            active={direction === 'deposit'}
+            onClick={() => setDirection('deposit')}
+            icon={ArrowDownToLine}
+            label="Deposit"
+            hint="bank → fund"
+          />
+          <ChoiceButton
+            active={direction === 'withdraw'}
+            onClick={() => setDirection('withdraw')}
+            icon={ArrowUpFromLine}
+            label="Withdraw"
+            hint="fund → bank"
+          />
+        </div>
+      )}
+
+      {/* paid with — for anything that can be charged to the card */}
+      {canUseCredit(type) && (
         <div>
           <span className="mb-1.5 block text-sm font-medium">Paid with</span>
           <div className="grid grid-cols-2 gap-2">
-            <PayButton
+            <ChoiceButton
               active={method === 'cash'}
               onClick={() => setMethod('cash')}
               icon={Banknote}
               label="Cash"
               hint="cash, UPI, debit"
             />
-            <PayButton
+            <ChoiceButton
               active={method === 'credit'}
               onClick={() => setMethod('credit')}
               icon={CreditCard}
@@ -181,11 +277,42 @@ export default function TransactionForm({
         </div>
       )}
 
-      {/* category */}
-      {!isBill && (
+      {/* category / investment bucket / fund */}
+      {kind && (
         <div>
-          <span className="mb-1.5 block text-sm font-medium">Category</span>
-          <CategoryPicker categories={categories} kind={type} value={categoryId} onChange={setCategoryId} />
+          <span className="mb-1.5 block text-sm font-medium">
+            {mode === 'fund' ? 'Fund' : mode === 'investment' ? 'Invest in' : 'Category'}
+          </span>
+          {isHolding && options.length === 0 ? (
+            <div className="flex items-center justify-between gap-3 rounded-xl border border-dashed border-slate-300 p-3 dark:border-slate-700">
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                {mode === 'fund' ? 'You don’t have a fund yet.' : 'You don’t have an investment category yet.'}
+              </p>
+              <button
+                type="button"
+                disabled={addCategory.isPending}
+                onClick={() => createStarter(mode === 'fund' ? 'fund' : 'investment')}
+                className="shrink-0 rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:hover:bg-slate-800"
+              >
+                {mode === 'fund'
+                  ? `${STARTER_HOLDINGS.fund.icon} Create ${STARTER_HOLDINGS.fund.name}`
+                  : `${STARTER_HOLDINGS.investment.icon} Create ${STARTER_HOLDINGS.investment.name}`}
+              </button>
+            </div>
+          ) : (
+            <CategoryPicker categories={categories} kind={kind} value={chosenId} onChange={setCategoryId} />
+          )}
+          {mode === 'fund' && chosenId && (
+            <p
+              className={`mt-2 text-xs ${
+                overdraws ? 'font-semibold text-amber-700 dark:text-amber-400' : 'text-slate-500 dark:text-slate-400'
+              }`}
+            >
+              {overdraws
+                ? `That’s more than the ${formatMoney(available, currency)} in this fund.`
+                : `Balance: ${formatMoney(available, currency)}`}
+            </p>
+          )}
         </div>
       )}
 
@@ -210,7 +337,7 @@ export default function TransactionForm({
             value={note}
             maxLength={200}
             onChange={(e) => setNote(e.target.value)}
-            placeholder={isBill ? 'Credit card bill' : 'e.g. Lunch with team'}
+            placeholder={isBill ? 'Credit card bill' : mode === 'investment' ? 'e.g. Index fund SIP' : 'e.g. Lunch with team'}
             className="w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2.5 text-sm outline-none focus:border-emerald-500 dark:border-slate-700"
           />
         </label>
@@ -242,14 +369,14 @@ export default function TransactionForm({
           className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-emerald-600 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-emerald-700 disabled:opacity-60"
         >
           {busy && <Loader2 className="size-4 animate-spin" />}
-          {existing ? 'Save changes' : isBill ? 'Record payment' : 'Add'}
+          {submitLabel}
         </button>
       </div>
     </form>
   )
 }
 
-function PayButton({
+function ChoiceButton({
   active,
   onClick,
   icon: Icon,

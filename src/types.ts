@@ -1,13 +1,21 @@
-/** Categories only ever describe money in or money out. */
-export type CategoryKind = 'expense' | 'income'
+/** Expense and income categories describe money out and money in. Investment and
+ *  fund categories are holdings: money you keep rather than spend. Each investment
+ *  category is a bucket you invest into; each fund (e.g. Emergency fund) has a
+ *  running balance. */
+export type CategoryKind = 'expense' | 'income' | 'investment' | 'fund'
 
-/** `card_payment` settles the credit-card bill. It moves money out of your bank
- *  but is NOT spending — the spending was already recorded when each item was
- *  charged to the card, so counting it again would double-count. It is excluded
- *  from every total, chart and budget, and only reduces the card's outstanding. */
-export type TxType = CategoryKind | 'card_payment'
+/** Only `expense` is spending. Every other outflow is a transfer and is excluded
+ *  from spending totals, charts and budgets:
+ *  - `card_payment` settles the credit-card bill — the purchases were already
+ *    counted when charged, so counting the bill too would double-count.
+ *  - `investment` moves money into an investment category.
+ *  - `fund_deposit` / `fund_withdrawal` move money into / out of a fund. */
+export type TxType = 'expense' | 'income' | 'card_payment' | 'investment' | 'fund_deposit' | 'fund_withdrawal'
 
-/** How an expense was paid: 'cash' means the money left immediately (cash, UPI,
+/** Types a recurring rule may post. */
+export type RecurringType = 'expense' | 'income' | 'investment' | 'fund_deposit'
+
+/** How an outflow was paid: 'cash' means the money left immediately (cash, UPI,
  *  debit); 'credit' means it was charged to the card and leaves at bill time. */
 export type PaymentMethod = 'cash' | 'credit'
 
@@ -29,6 +37,9 @@ export interface Category {
   color: string
   is_archived: boolean
   sort_order: number
+  /** Holdings only: amount held before tracking began. Absent until the
+   *  database is on schema version 3. */
+  opening_balance?: number
 }
 
 export interface Transaction {
@@ -54,6 +65,24 @@ export interface CreditSummary {
   last_paid_amount: number | null
 }
 
+/** One investment or fund category, totalled over all history. */
+export interface HoldingSummary {
+  category_id: string
+  kind: 'investment' | 'fund'
+  name: string
+  icon: string
+  color: string
+  is_archived: boolean
+  opening_balance: number
+  /** investments + fund deposits */
+  deposited: number
+  /** fund withdrawals */
+  withdrawn: number
+  /** opening + deposited − withdrawn. For investments: amount invested (cost), not market value. */
+  balance: number
+  last_activity: string | null
+}
+
 export interface Budget {
   id: string
   user_id: string
@@ -65,7 +94,7 @@ export interface Budget {
 export interface RecurringRule {
   id: string
   user_id: string
-  type: CategoryKind
+  type: RecurringType
   amount: number
   category_id: string | null
   payment_method: PaymentMethod

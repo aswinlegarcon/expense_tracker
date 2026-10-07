@@ -19,6 +19,10 @@ html {
   --chart-prev: #d97706;
   --chart-grid: #e2e8f0;
   --chart-axis: #64748b;
+  /* invested / fund / kept-in-bank: validated as an adjacent trio (stacked bar) */
+  --chart-invest: #4f46e5;
+  --chart-fund: #0284c7;
+  --chart-kept: #059669;
 }
 
 html.dark {
@@ -28,6 +32,10 @@ html.dark {
   --chart-prev: #d97706;
   --chart-grid: #1e293b;
   --chart-axis: #94a3b8;
+  /* dark steps chosen for the slate-900 card: same hues, re-validated (not a flip) */
+  --chart-invest: #5856ee;
+  --chart-fund: #0b97d4;
+  --chart-kept: #059669;
 }
 
 body {

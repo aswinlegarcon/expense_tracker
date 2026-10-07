@@ -1,7 +1,8 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { describeError } from '../lib/errors'
 import { supabase } from '../lib/supabase'
-import type { CategoryKind, Frequency, PaymentMethod, TxType } from '../types'
+import type { MovableKind } from '../lib/txKinds'
+import type { CategoryKind, Frequency, PaymentMethod, RecurringType, TxType } from '../types'
 
 function useInvalidating<TArgs>(keys: string[][], fn: (args: TArgs) => Promise<void>) {
   const qc = useQueryClient()
@@ -27,8 +28,8 @@ export interface TxInput {
   note: string
 }
 
-// Any transaction write can move the card balance, so refresh it alongside ['tx'].
-const TX_KEYS = [['tx'], ['credit']]
+// Any transaction write can move the card balance and holding totals, so refresh them with ['tx'].
+const TX_KEYS = [['tx'], ['credit'], ['holdings']]
 
 export function useAddTransaction() {
   return useInvalidating(TX_KEYS, (input: TxInput) => run(supabase.from('transactions').insert(input)))
@@ -51,20 +52,55 @@ export interface CategoryInput {
   kind: CategoryKind
   icon: string
   color: string
+  /** investment and fund kinds only */
+  opening_balance?: number
+}
+
+/** opening_balance exists only from schema version 3, and only means something for
+ *  holdings — never send it for expense/income so those keep working on older databases. */
+function withoutOpeningUnlessHolding<T extends { kind: CategoryKind; opening_balance?: number }>(input: T) {
+  if (input.kind === 'investment' || input.kind === 'fund') return input
+  const rest = { ...input }
+  delete rest.opening_balance
+  return rest
 }
 
 export function useAddCategory() {
-  return useInvalidating([['categories']], (input: CategoryInput) =>
-    run(supabase.from('categories').insert(input)),
+  return useInvalidating([['categories'], ['holdings']], (input: CategoryInput) =>
+    run(supabase.from('categories').insert(withoutOpeningUnlessHolding(input))),
   )
 }
 
+/** kind is deliberately absent: changing it must go through useMoveCategory, which
+ *  re-labels the category's entries in the same step. */
+export interface CategoryPatch {
+  id: string
+  name?: string
+  icon?: string
+  color?: string
+  is_archived?: boolean
+  opening_balance?: number
+}
+
 export function useUpdateCategory() {
-  return useInvalidating(
-    [['categories'], ['tx']],
-    ({ id, ...patch }: Partial<CategoryInput> & { id: string; is_archived?: boolean }) =>
-      run(supabase.from('categories').update(patch).eq('id', id)),
+  return useInvalidating([['categories'], ['tx'], ['holdings']], ({ id, ...patch }: CategoryPatch) =>
+    run(supabase.from('categories').update(patch).eq('id', id)),
   )
+}
+
+/** Move a category between expense, investment and fund, re-labelling its entries
+ *  atomically. Resolves to the number of entries re-labelled. */
+export function useMoveCategory() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ id, kind }: { id: string; kind: MovableKind }): Promise<number> => {
+      const { data, error } = await supabase.rpc('move_category', { p_category_id: id, p_kind: kind })
+      if (error) throw new Error(describeError(error.message))
+      return typeof data === 'number' ? data : 0
+    },
+    // every view can change: spending, card, holdings, budgets, recurring
+    onSuccess: () => qc.invalidateQueries(),
+  })
 }
 
 // ---------- budgets ----------
@@ -82,7 +118,7 @@ export function useDeleteBudget() {
 // ---------- recurring rules ----------
 
 export interface RecurringInput {
-  type: CategoryKind
+  type: RecurringType
   amount: number
   category_id: string | null
   payment_method: PaymentMethod

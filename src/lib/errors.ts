@@ -1,7 +1,8 @@
-/** Postgres/PostgREST codes meaning "the app expects schema this database
- *  doesn't have yet" — i.e. schema.sql has not been re-run after an update. */
+/** Postgres/PostgREST errors meaning "the app expects schema this database
+ *  doesn't have yet" — i.e. schema.sql has not been re-run after an update. The
+ *  named checks reject the newer transaction types and category kinds. */
 const SCHEMA_DRIFT =
-  /schema cache|column .* does not exist|function .* does not exist|PGRST202|PGRST204|42703|42883/i
+  /schema cache|column .* does not exist|function .* does not exist|PGRST202|PGRST204|42703|42883|transactions_type_check|recurring_rules_type_check|categories_kind_check/i
 
 export const SCHEMA_DRIFT_HELP =
   'Your database is missing a recent update. Open the Supabase SQL Editor, re-run supabase/schema.sql, then reload this page.'

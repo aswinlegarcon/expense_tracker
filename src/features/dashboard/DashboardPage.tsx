@@ -1,4 +1,4 @@
-import { ArrowDownRight, ArrowUpRight, LayoutDashboard, PiggyBank, TrendingDown, TrendingUp } from 'lucide-react'
+import { ArrowDownRight, ArrowUpRight, LayoutDashboard, PiggyBank, Sprout, TrendingDown, TrendingUp } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import {
   Bar,
@@ -17,16 +17,18 @@ import {
 import EmptyState from '../../components/EmptyState'
 import Sheet from '../../components/Sheet'
 import StatCard from '../../components/StatCard'
-import { useCategories, useCreditSummary, useTransactions } from '../../data/queries'
+import { useCategories, useCreditSummary, useHasHoldings, useHoldings, useTransactions } from '../../data/queries'
 import { formatMonth, formatShortMonth, monthEndISO, monthKey, monthStartISO } from '../../lib/dates'
 import { formatMoney, formatMoneyCompact, round2 } from '../../lib/money'
 import TransactionForm from '../transactions/TransactionForm'
 import { ChartCard, ChartTip, LegendChips } from './ChartBits'
 import CreditCardPanel from './CreditCardPanel'
+import SavingsPanel from './SavingsPanel'
 import {
   categoryBreakdown,
   creditMonthActivity,
   cumulativeByDay,
+  holdingFlows,
   momComparison,
   monthlyTotals,
   type MoMRow,
@@ -40,6 +42,8 @@ export default function DashboardPage({ currency }: { currency: string }) {
   const { data: tx = [], isLoading } = useTransactions(from, to)
   const { data: categories = [] } = useCategories()
   const { data: credit } = useCreditSummary()
+  const hasHoldings = useHasHoldings()
+  const { data: holdings = [] } = useHoldings()
   const [payingBill, setPayingBill] = useState(false)
 
   const catById = useMemo(() => new Map(categories.map((c) => [c.id, c])), [categories])
@@ -64,13 +68,17 @@ export default function DashboardPage({ currency }: { currency: string }) {
   const prev = totals[WINDOW - 2]
   const net = round2(cur.income - cur.expense)
   const spentPct = prev.expense > 0 ? ((cur.expense - prev.expense) / prev.expense) * 100 : null
+  const investedNow = holdingFlows(tx, curMonth).invested
+  const investedTotal = round2(
+    holdings.filter((h) => h.kind === 'investment').reduce((sum, h) => sum + h.balance, 0),
+  )
 
   if (isLoading) {
     return (
       <div className="space-y-4">
         <h1 className="text-2xl font-bold tracking-tight">Dashboard</h1>
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
-          {[0, 1, 2].map((i) => (
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+          {[0, 1, 2, 3].map((i) => (
             <div key={i} className="h-28 animate-pulse rounded-2xl bg-slate-200/70 dark:bg-slate-800/70" />
           ))}
         </div>
@@ -86,7 +94,7 @@ export default function DashboardPage({ currency }: { currency: string }) {
       </div>
 
       {/* stat tiles */}
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
+      <div className={`grid grid-cols-2 gap-3 ${hasHoldings ? 'md:grid-cols-4' : 'md:grid-cols-3'}`}>
         <StatCard
           label="Spent this month"
           value={formatMoney(cur.expense, currency)}
@@ -108,6 +116,15 @@ export default function DashboardPage({ currency }: { currency: string }) {
           }
         />
         <StatCard label="Income" value={formatMoney(cur.income, currency)} icon={TrendingUp} tone="green" />
+        {hasHoldings && (
+          <StatCard
+            label="Invested this month"
+            value={formatMoney(investedNow, currency)}
+            icon={Sprout}
+            tone="indigo"
+            sub={`${formatMoney(investedTotal, currency)} invested in total`}
+          />
+        )}
         <StatCard
           label="Net savings"
           value={formatMoney(net, currency)}
@@ -123,6 +140,17 @@ export default function DashboardPage({ currency }: { currency: string }) {
           month={creditMonth}
           currency={currency}
           onPayBill={() => setPayingBill(true)}
+        />
+      )}
+
+      {hasHoldings && (
+        <SavingsPanel
+          tx={tx}
+          months={months}
+          curMonth={curMonth}
+          income={cur.income}
+          expense={cur.expense}
+          currency={currency}
         />
       )}
 

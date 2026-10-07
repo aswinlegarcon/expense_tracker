@@ -99,7 +99,7 @@ export default function SettingsPage({ currency }: { currency: string }) {
       </Section>
 
       <Section title="Categories">
-        <CategoryManager />
+        <CategoryManager currency={profile?.currency ?? currency} />
       </Section>
 
       <Section title="Recurring transactions">

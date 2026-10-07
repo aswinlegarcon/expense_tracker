@@ -6,10 +6,24 @@ import EmptyState from '../../components/EmptyState'
 import Sheet from '../../components/Sheet'
 import { useToast } from '../../components/Toast'
 import { useAddRecurring, useDeleteRecurring, useUpdateRecurring } from '../../data/mutations'
-import { useCategories, useRecurring } from '../../data/queries'
+import { useCategories, useHasHoldings, useRecurring } from '../../data/queries'
 import { formatFullDate, todayISO } from '../../lib/dates'
+import { errorText } from '../../lib/errors'
 import { formatMoney } from '../../lib/money'
-import type { CategoryKind, Frequency, PaymentMethod, RecurringRule } from '../../types'
+import { TYPE_META, canUseCredit, kindOfType, signOf } from '../../lib/txKinds'
+import type { CategoryKind, Frequency, PaymentMethod, RecurringRule, RecurringType } from '../../types'
+
+const RULE_TYPES: { value: RecurringType; label: string; activeClass: string; holdings?: true }[] = [
+  { value: 'expense', label: 'Expense', activeClass: 'text-red-600 dark:text-red-400' },
+  { value: 'income', label: 'Income', activeClass: 'text-emerald-600 dark:text-emerald-400' },
+  { value: 'investment', label: 'Invest', activeClass: 'text-indigo-600 dark:text-indigo-400', holdings: true },
+  { value: 'fund_deposit', label: 'Fund', activeClass: 'text-sky-600 dark:text-sky-400', holdings: true },
+]
+
+/** Every recurring type is filed under a category kind. */
+function ruleKind(type: RecurringType): CategoryKind {
+  return kindOfType(type) ?? 'expense'
+}
 
 export default function RecurringManager({ currency }: { currency: string }) {
   const { data: rules = [] } = useRecurring()
@@ -58,7 +72,14 @@ export default function RecurringManager({ currency }: { currency: string }) {
                     <span className="block truncate text-sm font-medium">
                       {r.note || cat?.name || 'Recurring'}
                       <span className="ml-1.5 text-[10px] text-slate-400 uppercase">{r.frequency}</span>
-                    {r.type === 'expense' && r.payment_method === 'credit' && (
+                      {TYPE_META[r.type].chip && (
+                        <span
+                          className={`ml-1.5 rounded-full px-1.5 py-px text-[9px] font-bold tracking-wide uppercase ${TYPE_META[r.type].chip?.className}`}
+                        >
+                          {TYPE_META[r.type].chip?.text}
+                        </span>
+                      )}
+                    {canUseCredit(r.type) && r.payment_method === 'credit' && (
                       <span className="ml-1.5 rounded-full bg-violet-100 px-1.5 py-px text-[9px] font-bold tracking-wide text-violet-700 uppercase dark:bg-violet-950/60 dark:text-violet-300">
                         Credit
                       </span>
@@ -68,12 +89,8 @@ export default function RecurringManager({ currency }: { currency: string }) {
                       {r.is_active ? `next ${formatFullDate(r.next_occurrence)}` : 'paused'}
                     </span>
                   </span>
-                  <span
-                    className={`text-sm font-semibold tabular-nums ${
-                      r.type === 'expense' ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400'
-                    }`}
-                  >
-                    {r.type === 'expense' ? '−' : '+'}
+                  <span className={`text-sm font-semibold tabular-nums ${TYPE_META[r.type].amountClass}`}>
+                    {signOf(r.type)}
                     {formatMoney(r.amount, currency)}
                   </span>
                 </button>
@@ -115,7 +132,8 @@ function RecurringForm({
   onDone: () => void
 }) {
   const { data: categories = [] } = useCategories()
-  const [type, setType] = useState<CategoryKind>(existing?.type ?? 'expense')
+  const hasHoldings = useHasHoldings()
+  const [type, setType] = useState<RecurringType>(existing?.type ?? 'expense')
   const [amount, setAmount] = useState(existing ? String(existing.amount) : '')
   const [categoryId, setCategoryId] = useState<string | null>(existing?.category_id ?? null)
   const [method, setMethod] = useState<PaymentMethod>(existing?.payment_method ?? 'cash')
@@ -132,9 +150,9 @@ function RecurringForm({
   const toast = useToast()
   const busy = add.isPending || update.isPending || del.isPending
 
-  function switchType(t: CategoryKind) {
+  function switchType(t: RecurringType) {
     setType(t)
-    if (categoryId && categories.find((c) => c.id === categoryId)?.kind !== t) setCategoryId(null)
+    if (categoryId && categories.find((c) => c.id === categoryId)?.kind !== ruleKind(t)) setCategoryId(null)
   }
 
   async function onSubmit(e: FormEvent) {
@@ -148,7 +166,8 @@ function RecurringForm({
       type,
       amount: value,
       category_id: categoryId,
-      payment_method: type === 'expense' ? method : ('cash' as const),
+      // keep 'credit' for every card-chargeable type, so a card-paid SIP stays on the card
+      payment_method: canUseCredit(type) ? method : ('cash' as const),
       note: note.trim(),
       frequency,
       start_date: startDate,
@@ -166,7 +185,7 @@ function RecurringForm({
       }
       onDone()
     } catch (err) {
-      toast(err instanceof Error ? err.message : 'Failed to save', 'error')
+      toast(errorText(err), 'error')
     }
   }
 
@@ -176,27 +195,25 @@ function RecurringForm({
       await del.mutateAsync(existing.id)
       onDone()
     } catch (err) {
-      toast(err instanceof Error ? err.message : 'Failed to delete', 'error')
+      toast(errorText(err), 'error')
     }
   }
 
   return (
     <form onSubmit={onSubmit} className="space-y-4">
-      <div className="grid grid-cols-2 rounded-xl bg-slate-100 p-1 dark:bg-slate-800">
-        {(['expense', 'income'] as const).map((t) => (
+      <div
+        className={`grid rounded-xl bg-slate-100 p-1 dark:bg-slate-800 ${hasHoldings ? 'grid-cols-4' : 'grid-cols-2'}`}
+      >
+        {RULE_TYPES.filter((t) => hasHoldings || !t.holdings).map((t) => (
           <button
-            key={t}
+            key={t.value}
             type="button"
-            onClick={() => switchType(t)}
-            className={`rounded-lg py-2 text-sm font-semibold capitalize ${
-              type === t
-                ? t === 'expense'
-                  ? 'bg-white text-red-600 shadow-sm dark:bg-slate-900 dark:text-red-400'
-                  : 'bg-white text-emerald-600 shadow-sm dark:bg-slate-900 dark:text-emerald-400'
-                : 'text-slate-500 dark:text-slate-400'
+            onClick={() => switchType(t.value)}
+            className={`rounded-lg py-2 text-sm font-semibold ${
+              type === t.value ? `bg-white shadow-sm dark:bg-slate-900 ${t.activeClass}` : 'text-slate-500 dark:text-slate-400'
             }`}
           >
-            {t}
+            {t.label}
           </button>
         ))}
       </div>
@@ -230,7 +247,7 @@ function RecurringForm({
         </label>
       </div>
 
-      {type === 'expense' && (
+      {canUseCredit(type) && (
         <div>
           <span className="mb-1.5 block text-sm font-medium">Paid with</span>
           <div className="grid grid-cols-2 rounded-lg bg-slate-100 p-1 dark:bg-slate-800">
@@ -251,8 +268,10 @@ function RecurringForm({
       )}
 
       <div>
-        <span className="mb-1.5 block text-sm font-medium">Category</span>
-        <CategoryPicker categories={categories} kind={type} value={categoryId} onChange={setCategoryId} />
+        <span className="mb-1.5 block text-sm font-medium">
+          {type === 'fund_deposit' ? 'Fund' : type === 'investment' ? 'Invest in' : 'Category'}
+        </span>
+        <CategoryPicker categories={categories} kind={ruleKind(type)} value={categoryId} onChange={setCategoryId} />
       </div>
 
       <div className="grid grid-cols-2 gap-3">

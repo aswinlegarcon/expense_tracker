@@ -2,21 +2,38 @@ import { ChevronLeft, ChevronRight, CreditCard, ReceiptText, Repeat, Search } fr
 import { useMemo, useState } from 'react'
 import EmptyState from '../../components/EmptyState'
 import Sheet from '../../components/Sheet'
-import { useCategories, useTransactions } from '../../data/queries'
+import { useCategories, useHasHoldings, useTransactions } from '../../data/queries'
 import { formatDay, formatMonth, monthEndISO, monthKey, monthStartISO, todayISO, type ISODate } from '../../lib/dates'
 import { formatMoney, round2 } from '../../lib/money'
-import type { Category, PaymentMethod, Transaction, TxType } from '../../types'
+import { TYPE_META, canUseCredit, kindOfType, signOf } from '../../lib/txKinds'
+import type { Category, CategoryKind, PaymentMethod, Transaction } from '../../types'
 import TransactionForm from './TransactionForm'
 
-type TypeFilter = 'all' | TxType
+/** 'fund' covers both deposits and withdrawals. */
+type TypeFilter = 'all' | 'expense' | 'income' | 'investment' | 'fund' | 'card_payment'
 type MethodFilter = 'all' | PaymentMethod
 
-const TYPE_FILTERS: { value: TypeFilter; label: string }[] = [
+const TYPE_FILTERS: { value: TypeFilter; label: string; holdings?: true }[] = [
   { value: 'all', label: 'All' },
   { value: 'expense', label: 'Expense' },
   { value: 'income', label: 'Income' },
+  { value: 'investment', label: 'Invest', holdings: true },
+  { value: 'fund', label: 'Fund', holdings: true },
   { value: 'card_payment', label: 'Card bill' },
 ]
+
+function matchesType(t: Transaction, filter: TypeFilter): boolean {
+  if (filter === 'all') return true
+  if (filter === 'fund') return t.type === 'fund_deposit' || t.type === 'fund_withdrawal'
+  return t.type === filter
+}
+
+/** Category kind a type filter narrows the category list to (null = no categories). */
+function kindOfFilter(filter: TypeFilter): CategoryKind | 'all' | null {
+  if (filter === 'all') return 'all'
+  if (filter === 'fund') return 'fund'
+  return kindOfType(filter)
+}
 
 export default function TransactionsPage({ currency }: { currency: string }) {
   const [monthStart, setMonthStart] = useState<ISODate>(monthStartISO(0))
@@ -30,15 +47,17 @@ export default function TransactionsPage({ currency }: { currency: string }) {
 
   const { data: categories = [] } = useCategories()
   const { data: transactions, isLoading } = useTransactions(monthStart, monthEnd)
+  const hasHoldings = useHasHoldings()
+  const filterKind = kindOfFilter(typeFilter)
 
   const catById = useMemo(() => new Map(categories.map((c) => [c.id, c])), [categories])
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
     return (transactions ?? []).filter((t) => {
-      if (typeFilter !== 'all' && t.type !== typeFilter) return false
-      // a bill payment has no payment method of its own — hide it when filtering by one
-      if (methodFilter !== 'all' && (t.type !== 'expense' || t.payment_method !== methodFilter)) return false
+      if (!matchesType(t, typeFilter)) return false
+      // only card-chargeable entries have a meaningful payment method — hide the rest when filtering by one
+      if (methodFilter !== 'all' && (!canUseCredit(t.type) || t.payment_method !== methodFilter)) return false
       if (categoryFilter !== 'all' && t.category_id !== categoryFilter) return false
       if (q) {
         const cat = t.category_id ? catById.get(t.category_id)?.name.toLowerCase() : ''
@@ -88,10 +107,13 @@ export default function TransactionsPage({ currency }: { currency: string }) {
       {/* filters */}
       <div className="flex flex-wrap items-center gap-2">
         <div className="flex rounded-lg bg-slate-200/70 p-0.5 dark:bg-slate-800">
-          {TYPE_FILTERS.map((t) => (
+          {TYPE_FILTERS.filter((t) => hasHoldings || !t.holdings).map((t) => (
             <button
               key={t.value}
-              onClick={() => setTypeFilter(t.value)}
+              onClick={() => {
+                setTypeFilter(t.value)
+                setCategoryFilter('all')
+              }}
               className={`rounded-md px-2.5 py-1.5 text-xs font-semibold ${
                 typeFilter === t.value
                   ? 'bg-white shadow-sm dark:bg-slate-900'
@@ -122,7 +144,7 @@ export default function TransactionsPage({ currency }: { currency: string }) {
         >
           <option value="all">All categories</option>
           {categories
-            .filter((c) => !c.is_archived && (typeFilter === 'all' || c.kind === typeFilter))
+            .filter((c) => !c.is_archived && (filterKind === 'all' || c.kind === filterKind))
             .map((c) => (
               <option key={c.id} value={c.id}>
                 {c.icon} {c.name}
@@ -212,6 +234,7 @@ function DayGroup({
         {items.map((t) => {
           const isBill = t.type === 'card_payment'
           const cat = t.category_id ? catById.get(t.category_id) : undefined
+          const meta = TYPE_META[t.type]
           return (
             <button
               key={t.id}
@@ -228,7 +251,14 @@ function DayGroup({
                 <span className="flex items-center gap-1.5 truncate text-sm font-medium">
                   {isBill ? 'Credit card bill' : (cat?.name ?? 'Uncategorised')}
                   {t.recurring_rule_id && <Repeat className="size-3 shrink-0 text-slate-400" />}
-                  {t.type === 'expense' && t.payment_method === 'credit' && (
+                  {meta.chip && (
+                    <span
+                      className={`shrink-0 rounded-full px-1.5 py-px text-[9px] font-bold tracking-wide uppercase ${meta.chip.className}`}
+                    >
+                      {meta.chip.text}
+                    </span>
+                  )}
+                  {canUseCredit(t.type) && t.payment_method === 'credit' && (
                     <span className="shrink-0 rounded-full bg-violet-100 px-1.5 py-px text-[9px] font-bold tracking-wide text-violet-700 uppercase dark:bg-violet-950/60 dark:text-violet-300">
                       Credit
                     </span>
@@ -236,16 +266,8 @@ function DayGroup({
                 </span>
                 {t.note && <span className="block truncate text-xs text-slate-400 dark:text-slate-500">{t.note}</span>}
               </span>
-              <span
-                className={`shrink-0 text-sm font-semibold tabular-nums ${
-                  isBill
-                    ? 'text-violet-600 dark:text-violet-400'
-                    : t.type === 'expense'
-                      ? 'text-red-600 dark:text-red-400'
-                      : 'text-emerald-600 dark:text-emerald-400'
-                }`}
-              >
-                {t.type === 'income' ? '+' : '−'}
+              <span className={`shrink-0 text-sm font-semibold tabular-nums ${meta.amountClass}`}>
+                {signOf(t.type)}
                 {formatMoney(t.amount, currency)}
               </span>
             </button>

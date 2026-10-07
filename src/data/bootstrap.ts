@@ -1,6 +1,6 @@
 import { todayISO } from '../lib/dates'
 import { supabase } from '../lib/supabase'
-import { DEFAULT_CATEGORIES } from './defaults'
+import { DEFAULT_CATEGORIES, DEFAULT_HOLDINGS } from './defaults'
 
 /** Runs once per session after sign-in. Idempotent and race-safe:
  *  - ensures the profile row exists (covers accounts created before schema.sql ran)
@@ -16,6 +16,10 @@ export async function ensureBootstrap(userId: string): Promise<number> {
     await supabase
       .from('categories')
       .upsert(DEFAULT_CATEGORIES, { onConflict: 'user_id,kind,name', ignoreDuplicates: true })
+    // separate call: an older database rejects the new kinds without losing the rows above
+    await supabase
+      .from('categories')
+      .upsert(DEFAULT_HOLDINGS, { onConflict: 'user_id,kind,name', ignoreDuplicates: true })
   }
 
   const { data: posted } = await supabase.rpc('post_due_recurring', { p_today: todayISO() })

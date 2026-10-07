@@ -1,5 +1,6 @@
 import { monthKey, todayISO } from '../../lib/dates'
 import { round2 } from '../../lib/money'
+import { canUseCredit } from '../../lib/txKinds'
 import type { Category, Transaction } from '../../types'
 
 export interface MonthTotals {
@@ -145,10 +146,55 @@ export function creditMonthActivity(tx: Transaction[], month: string): { charged
   let paid = 0
   for (const t of tx) {
     if (monthKey(t.occurred_on) !== month) continue
-    if (t.type === 'expense' && t.payment_method === 'credit') charged += t.amount
+    // every card-chargeable type counts, matching credit_summary() — a card-paid
+    // investment is still on the card even though it isn't spending
+    if (canUseCredit(t.type) && t.payment_method === 'credit') charged += t.amount
     else if (t.type === 'card_payment') paid += t.amount
   }
   return { charged: round2(charged), paid: round2(paid) }
+}
+
+/** Money moved into or out of holdings during one month. */
+export interface HoldingFlows {
+  invested: number
+  fundIn: number
+  fundOut: number
+}
+
+export function holdingFlows(tx: Transaction[], month: string): HoldingFlows {
+  let invested = 0
+  let fundIn = 0
+  let fundOut = 0
+  for (const t of tx) {
+    if (monthKey(t.occurred_on) !== month) continue
+    if (t.type === 'investment') invested += t.amount
+    else if (t.type === 'fund_deposit') fundIn += t.amount
+    else if (t.type === 'fund_withdrawal') fundOut += t.amount
+  }
+  return { invested: round2(invested), fundIn: round2(fundIn), fundOut: round2(fundOut) }
+}
+
+/** Amount invested per month over the window, oldest first. */
+export function investedByMonth(tx: Transaction[], months: string[]): { month: string; invested: number }[] {
+  const sums = new Map<string, number>(months.map((m) => [m, 0]))
+  for (const t of tx) {
+    if (t.type !== 'investment') continue
+    const m = monthKey(t.occurred_on)
+    if (sums.has(m)) sums.set(m, sums.get(m)! + t.amount)
+  }
+  return months.map((m) => ({ month: m, invested: round2(sums.get(m)!) }))
+}
+
+/** Net change per fund in one month (deposits − withdrawals), keyed by category id. */
+export function fundNetByCategory(tx: Transaction[], month: string): Map<string, number> {
+  const net = new Map<string, number>()
+  for (const t of tx) {
+    if (!t.category_id || monthKey(t.occurred_on) !== month) continue
+    if (t.type === 'fund_deposit') net.set(t.category_id, (net.get(t.category_id) ?? 0) + t.amount)
+    else if (t.type === 'fund_withdrawal') net.set(t.category_id, (net.get(t.category_id) ?? 0) - t.amount)
+  }
+  for (const [id, v] of net) net.set(id, round2(v))
+  return net
 }
 
 /** Cumulative expense by day-of-month for two months (for the pace chart). */

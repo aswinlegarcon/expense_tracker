@@ -1,8 +1,9 @@
-import type { TxType } from '../types'
+import { STARTER_HOLDINGS } from '../lib/txKinds'
+import type { CategoryKind } from '../types'
 
 /** Mirrors the seed in supabase/schema.sql handle_new_user(); used as the
  *  client-side fallback when the account predates the SQL script. */
-export const DEFAULT_CATEGORIES: { name: string; kind: TxType; icon: string; color: string; sort_order: number }[] = [
+export const DEFAULT_CATEGORIES: { name: string; kind: CategoryKind; icon: string; color: string; sort_order: number }[] = [
   { kind: 'expense', name: 'Food & Dining', icon: '🍽️', color: '#f97316', sort_order: 1 },
   { kind: 'expense', name: 'Groceries', icon: '🛒', color: '#84cc16', sort_order: 2 },
   { kind: 'expense', name: 'Transport', icon: '🚗', color: '#06b6d4', sort_order: 3 },
@@ -17,7 +18,15 @@ export const DEFAULT_CATEGORIES: { name: string; kind: TxType; icon: string; col
   { kind: 'expense', name: 'Other', icon: '📦', color: '#64748b', sort_order: 12 },
   { kind: 'income', name: 'Salary', icon: '💼', color: '#22c55e', sort_order: 1 },
   { kind: 'income', name: 'Freelance', icon: '💻', color: '#0ea5e9', sort_order: 2 },
-  { kind: 'income', name: 'Investments', icon: '📈', color: '#a855f7', sort_order: 3 },
+  { kind: 'income', name: 'Investment returns', icon: '📈', color: '#a855f7', sort_order: 3 },
   { kind: 'income', name: 'Gifts', icon: '🎁', color: '#f59e0b', sort_order: 4 },
   { kind: 'income', name: 'Other Income', icon: '💰', color: '#64748b', sort_order: 5 },
+]
+
+/** Fresh installs also start with one investment bucket and an emergency fund.
+ *  Seeded in a separate call: a database without investments and funds yet rejects
+ *  these rows, and that must not take the categories above down with them. */
+export const DEFAULT_HOLDINGS: { name: string; kind: CategoryKind; icon: string; color: string; sort_order: number }[] = [
+  { kind: 'investment', ...STARTER_HOLDINGS.investment, sort_order: 1 },
+  { kind: 'fund', ...STARTER_HOLDINGS.fund, sort_order: 1 },
 ]

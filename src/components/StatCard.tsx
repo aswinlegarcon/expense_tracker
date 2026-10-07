@@ -5,7 +5,7 @@ interface Props {
   label: string
   value: string
   icon: LucideIcon
-  tone: 'red' | 'green' | 'blue'
+  tone: 'red' | 'green' | 'blue' | 'indigo'
   sub?: ReactNode
 }
 
@@ -13,6 +13,7 @@ const TONES = {
   red: 'bg-red-100 text-red-600 dark:bg-red-950/60 dark:text-red-400',
   green: 'bg-emerald-100 text-emerald-600 dark:bg-emerald-950/60 dark:text-emerald-400',
   blue: 'bg-sky-100 text-sky-600 dark:bg-sky-950/60 dark:text-sky-400',
+  indigo: 'bg-indigo-100 text-indigo-600 dark:bg-indigo-950/60 dark:text-indigo-400',
 }
 
 export default function StatCard({ label, value, icon: Icon, tone, sub }: Props) {
